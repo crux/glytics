@@ -85,10 +85,11 @@ end
 # number mails archived yesterday
 
 def main args = []
-  c = YAML.load_file 'accounts.yml'
+  uname, password = *args
+  c = YAML.load_file 'accounts.yml' rescue {}
   account = c[:account]
   puts "account: #{account.inspect}"
-  mbox = M.new(account[:login], account[:password])
+  mbox = M.new(uname || account[:login], password || account[:password])
 
   puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
 
