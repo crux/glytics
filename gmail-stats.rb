@@ -1,4 +1,4 @@
-#!/user/bin/env ruby
+#!/usr/bin/env ruby
 
 require 'rubygems'
 require 'yaml'
@@ -85,11 +85,13 @@ end
 # number mails archived yesterday
 
 def main args = []
-  uname, password = *args
-  c = YAML.load_file 'accounts.yml' rescue {}
+  c = (YAML.load_file 'accounts.yml') rescue { :account => {} }
   account = c[:account]
+  uname, password = *args
+  uname && (account[:login] ||= uname)
+  password && (account[:password] ||= password)
   puts "account: #{account.inspect}"
-  mbox = M.new(uname || account[:login], password || account[:password])
+  mbox = M.new(account[:login], account[:password])
 
   puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
 
