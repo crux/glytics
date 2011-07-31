@@ -88,12 +88,13 @@ class MboxQueries
   end
 end
 
-def report login, password, date
+def report login, password, options 
   mbox = Mbox.new login, password
   #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
 
   q = MboxQueries.new mbox
 
+  date = options[:date]
   puts <<-EOR
  -- mails stats for #{date}
        deleted: #{q.number_of_deleted_mails date}
@@ -103,18 +104,26 @@ starred(total): #{q.total_number_of_starred_mails date+1}
   EOR
 end
 
+def server *args
+  puts "server.. #{args.inspect}"
+end
+
 # args: login, options: date
 #
 def main args, options = {}
   options = (Defaults.merge options)
-  date = Date.parse(options[:date])
+  options[:date] = Date.parse(options[:date]) # up-type string date
 
-  login = args.shift or raise "no username"
+  action = args.shift or raise "no action"
 
-  # password is prompted, never have that in a config or on the command line!
+  # account is an command line arg but password is prompted, never have that in
+  # a config or on the command line!
+  #
+  login = args.shift # or raise "no username"
   password = prompt_for_password
 
-  report login, password, date
+  # which method to run depend on first command line argument..
+  send action, login, password, options
 end
 
 params = Hash.from_argv ARGV
@@ -125,7 +134,7 @@ rescue => e
 
 ## #{e}
 
-usage: #{__FILE__} <username>
+usage: #{__FILE__} <task> <username>
 
   EOT
 end
