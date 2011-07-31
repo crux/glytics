@@ -6,7 +6,7 @@ require 'net/imap'
 require 'highline/import'
 require 'applix'
 
-def get_password prompt = 'enter password: '
+def prompt_for_password prompt = 'enter password: '
   ask(prompt) {|q| q.echo = '*'}
 end
 
@@ -14,7 +14,7 @@ Defaults = {
   :date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
 }
 
-class M < Net::IMAP
+class Mbox < Net::IMAP
   def initialize username, password
     super 'imap.gmail.com', '993', true
     @username, @password = username, password
@@ -66,7 +66,72 @@ def dump_fetch_data fd
     #yield data 
 end
 
+class MboxQueries 
+  def initialize mbox
+    @mbox = mbox
+  end
 
+  def number_of_deleted_mails on_date
+    (@mbox.mails_in_folder_on_given_date '[Gmail]/Trash', on_date).size
+  end
+
+  def number_of_sent_mails on_date
+    (@mbox.mails_in_folder_on_given_date '[Gmail]/Sent Mail', on_date).size
+  end
+
+  def number_of_archived_mails on_date
+    (@mbox.mails_in_folder_on_given_date '[Gmail]/All Mail', on_date).size
+  end
+
+  def total_number_of_starred_mails before_date
+    (@mbox.mails_in_folder_before_given_date '[Gmail]/Starred', before_date).size
+  end
+end
+
+def report login, password, date
+  mbox = Mbox.new login, password
+  #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
+
+  q = MboxQueries.new mbox
+
+  puts <<-EOR
+ -- mails stats for #{date}
+       deleted: #{q.number_of_deleted_mails date}
+          sent: #{q.number_of_sent_mails date}
+      archived: #{q.number_of_archived_mails date}
+starred(total): #{q.total_number_of_starred_mails date+1}
+  EOR
+end
+
+# args: login, options: date
+#
+def main args, options = {}
+  options = (Defaults.merge options)
+  date = Date.parse(options[:date])
+
+  login = args.shift or raise "no username"
+
+  # password is prompted, never have that in a config or on the command line!
+  password = prompt_for_password
+
+  report login, password, date
+end
+
+params = Hash.from_argv ARGV
+begin 
+  main params[:args], params
+rescue => e
+  puts <<-EOT
+
+## #{e}
+
+usage: #{__FILE__} <username>
+
+  EOT
+end
+
+__END__
+=begin
 def number_of_mail_in_folder mbox, folder
   mbox.examine folder
   uids = mbox.uid_search ['all']
@@ -106,42 +171,7 @@ def number_of_mails_deleted_yesterday mbox
     mbox, :date => (Date.today - 1), :folder => '[Gmail]/Trash'
   )
 end
-
-# args: login, options: date
-#
-def main args, options = {}
-
-  login = args.shift
-
-  options = (Defaults.merge options)
-  date = Date.parse(options[:date])
-
-  # password is prompted, never have that in a config or on the command line!
-  password = get_password
-
-  mbox = M.new login, password
-  puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
-
-  # number of deleted mails
-  mail_uids = mbox.mails_in_folder_on_given_date '[Gmail]/Trash', date
-  puts "number of deleted mails: #{mail_uids.size}"
-
-  # number of sent mails
-  mail_uids = mbox.mails_in_folder_on_given_date '[Gmail]/Sent Mail', date
-  puts "number of sent mails: #{mail_uids.size}"
-
-  # number of archived mails
-  mail_uids = mbox.mails_in_folder_on_given_date '[Gmail]/All Mail', date
-  puts "number of archived mails: #{mail_uids.size}"
-
-  # total number of starred mails
-  mail_uids = mbox.mails_in_folder_before_given_date('[Gmail]/Starred', date+1)
-  puts "total number of starred mails: #{mail_uids.size}"
-end
-
-params = Hash.from_argv ARGV
-main params[:args], params
-
+=end
 __END__
 p folders.select { |f| f.name == '[Gmail]' }
 
