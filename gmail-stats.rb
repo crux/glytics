@@ -3,6 +3,7 @@
 require 'rubygems'
 require 'yaml'
 require 'net/imap'
+require 'socket'
 require 'highline/import'
 require 'applix'
 
@@ -12,6 +13,7 @@ end
 
 Defaults = {
   :date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
+  :port => 2013, 
 }
 
 class Mbox < Net::IMAP
@@ -104,8 +106,22 @@ starred(total): #{q.total_number_of_starred_mails date+1}
   EOR
 end
 
-def server *args
-  puts "server.. #{args.inspect}"
+def server login, password, options 
+  puts "gmail stats server.."
+
+  mbox = Mbox.new login, password
+  q = MboxQueries.new mbox
+  date = options[:date]
+
+  server = TCPServer.new(options[:port])  
+  loop do # Servers run forever
+    client = server.accept       # Wait for a client to connect
+    puts "accept: #{client.addr}"
+    headers = "HTTP/1.1 200 OK\r\nDate: Tue, 14 Dec 2010 10:48:45 GMT\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
+    client.puts headers  # Send the time to the client
+    client.puts "#{date}:#{q.number_of_deleted_mails date}:#{q.number_of_sent_mails date}:#{q.number_of_archived_mails date}:#{q.total_number_of_starred_mails date+1}"
+    client.close
+  end
 end
 
 # args: login, options: date
@@ -136,6 +152,7 @@ rescue => e
 
 usage: #{__FILE__} <task> <username>
 
+--- #{e.backtrace.join "\n    "}
   EOT
 end
 
