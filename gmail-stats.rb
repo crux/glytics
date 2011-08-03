@@ -13,7 +13,7 @@ end
 
 Defaults = {
   :date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
-  :port => 2013, 
+  :interface => '127.0.0.1', :port => 2013, 
 }
 
 class Mbox < Net::IMAP
@@ -113,15 +113,19 @@ def server login, password, options
   q = MboxQueries.new mbox
   date = options[:date]
 
-  server = TCPServer.new(options[:port])  
+  server = TCPServer.new(options[:interface], options[:port])  
   loop do # Servers run forever
     client = server.accept       # Wait for a client to connect
     puts "accept: #{client.addr}"
-    headers = "HTTP/1.1 200 OK\r\nDate: Tue, 14 Dec 2010 10:48:45 GMT\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
-    client.puts headers  # Send the time to the client
-    client.puts "#{date}:#{q.number_of_deleted_mails date}:#{q.number_of_sent_mails date}:#{q.number_of_archived_mails date}:#{q.total_number_of_starred_mails date+1}"
+    #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
+    #client.puts headers  # Send the time to the client
+    #puts ">>>> #{headers}"
+    client.puts "#{date}:#{q.number_of_deleted_mails date}:#{q.number_of_sent_mails date}:#{q.number_of_archived_mails date}:#{q.total_number_of_starred_mails date+1}\n"
+    puts ">>>> #{date}:#{q.number_of_deleted_mails date}:#{q.number_of_sent_mails date}:#{q.number_of_archived_mails date}:#{q.total_number_of_starred_mails date+1}\n\n"
     client.close
   end
+ensure
+  server.close rescue nil
 end
 
 # args: login, options: date
