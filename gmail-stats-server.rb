@@ -16,58 +16,6 @@ Defaults = {
   :interface => '127.0.0.1', :port => 2013, 
 }
 
-class Mbox < Net::IMAP
-  def initialize username, password
-    super 'imap.gmail.com', '993', true
-    @username, @password = username, password
-    login username, password
-  end
-
-  def folders
-    @folders = self.list '', '[Gmail]/%'
-  end
-
-  # returns mail UID list
-  def mails_in_folder_on_given_date folder, date
-    examine folder
-    #condition = (date.nil? && ['all'] || ['ON', date.strftime '%e-%b-%Y']
-    uids = uid_search ['ON', date.strftime('%e-%b-%Y')]
-    #puts "#{uids.size} mails in #{folder} on #{date_s}"
-  end
-
-  def mails_in_folder_before_given_date folder, date
-    examine folder
-    uids = uid_search ['BEFORE', date.strftime('%e-%b-%Y')]
-    #puts "#{uids.size} mails in #{folder} on #{date_s}"
-  end
-end
-
-def dump_fetch_data fd
-  #msg = fd.attr['RFC822']
-  #puts "-->#{fd.attr['RFC822']}<--"
-  #puts "-#{fd} :: #{fd.attr['UID']}-"
-  puts "- #{fd.attr['UID']} -"
-  e = fd.attr['ENVELOPE']
-  puts "subject:     #{e.subject}"
-  puts "from:        #{e.from.first}"
-  return 
-    
-    puts <<-EOT
-  message_id:  #{e.message_id}
-  subject:     #{e.subject}
-  date:        #{e.date}
-  from:        #{e.from.first}
-  sender:      #{e.sender}
-  reply_to:    #{e.reply_to}
-  to:          #{e.to}
-  cc:          #{e.cc}
-  bcc:         #{e.bcc}
-  in_reply_to: #{e.in_reply_to}
-    EOT
-  #sender:      #{[:name, :route, :mailbox, :host].map {|x| e.sender.send x}}
-    #yield data 
-end
-
 class MboxQueries 
   def initialize mbox
     @mbox = mbox
@@ -90,6 +38,61 @@ class MboxQueries
   end
 end
 
+class Mbox < Net::IMAP
+  def initialize username, password
+    super 'imap.gmail.com', '993', true
+    @username, @password = username, password
+    login username, password
+  end
+
+  def queries
+    @queries ||= MboxQueries.new self
+  end
+
+  def folders
+    @folders = self.list '', '[Gmail]/%'
+  end
+
+  # returns mail UID list
+  def mails_in_folder_on_given_date folder, date
+    examine folder
+    #condition = (date.nil? && ['all'] || ['ON', date.strftime '%e-%b-%Y']
+    uids = uid_search ['ON', date.strftime('%e-%b-%Y')]
+    #puts "#{uids.size} mails in #{folder} on #{date_s}"
+  end
+
+  def mails_in_folder_before_given_date folder, date
+    examine folder
+    uids = uid_search ['BEFORE', date.strftime('%e-%b-%Y')]
+    #puts "#{uids.size} mails in #{folder} on #{date_s}"
+  end
+
+  def self.fetch_and_dump uids
+    attr = %w{UID RFC822 ENVELOPE}
+    uid_fetch(uids, attr).each do |fd| 
+      #msg = fd.attr['RFC822']
+      #puts "-->#{fd.attr['RFC822']}<--"
+      #puts "-#{fd} :: #{fd.attr['UID']}-"
+      puts "- #{fd.attr['UID']} -"
+      e = fd.attr['ENVELOPE']
+      puts <<-EOT
+message_id:  #{e.message_id}
+subject:     #{e.subject}
+date:        #{e.date}
+from:        #{e.from.first}
+sender:      #{e.sender}
+reply_to:    #{e.reply_to}
+to:          #{e.to}
+cc:          #{e.cc}
+bcc:         #{e.bcc}
+in_reply_to: #{e.in_reply_to}
+      EOT
+    end
+  #sender:      #{[:name, :route, :mailbox, :host].map {|x| e.sender.send x}}
+  #yield data 
+  end
+end
+
 def report login, password, options 
   mbox = Mbox.new login, password
   #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
@@ -106,26 +109,69 @@ starred(total): #{q.total_number_of_starred_mails date+1}
   EOR
 end
 
-def server login, password, options 
-  puts "gmail stats server.."
+class MboxDaemon 
 
-  mbox = Mbox.new login, password
-  q = MboxQueries.new mbox
-  date = options[:date]
+  def initialize mbox
+    @mbox = mbox
+    @queries = @mbox.queries
+  end
 
-  server = TCPServer.new(options[:interface], options[:port])  
-  loop do # Servers run forever
-    client = server.accept       # Wait for a client to connect
-    puts "accept: #{client.addr}"
+  def run options
+    puts "gmail stats server.."
+    server = TCPServer.new(options[:interface], options[:port])  
+    loop do # Servers run forever
+      client = server.accept # one client at a time
+      puts " -- #{Time.now} accept: #{client.addr}" 
+      (serve client, options)
+    end
+  ensure
+    server.close rescue nil
+  end
+
+  def serve client, options
+    while request = client.gets
+      request = request.strip.split /\s+/
+      puts "request: #{request.inspect}"
+      case request.shift
+      when /on_date/
+        options[:date] = Date.parse(request.first)
+        report client, options
+      when /yesterday/
+        report client, options
+      else 
+        raise "400 bad request: #{request}"
+      end
+    end
+  ensure
+    client.close rescue nil
+    puts "session closed"
+  end
+
+  def report client, options
     #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
     #client.puts headers  # Send the time to the client
     #puts ">>>> #{headers}"
-    client.puts "#{date}:#{q.number_of_deleted_mails date}:#{q.number_of_sent_mails date}:#{q.number_of_archived_mails date}:#{q.total_number_of_starred_mails date+1}\n"
-    puts ">>>> #{date}:#{q.number_of_deleted_mails date}:#{q.number_of_sent_mails date}:#{q.number_of_archived_mails date}:#{q.total_number_of_starred_mails date+1}\n\n"
-    client.close
+    date = options[:date]
+    values = [
+      date,
+      (@queries.number_of_deleted_mails date),
+      (@queries.number_of_sent_mails date),
+      (@queries.number_of_archived_mails date),
+      (@queries.total_number_of_starred_mails date+1)
+    ]
+    client.puts(values.join ':')
+    #puts ">>>> #{values.join ':'}"
   end
-ensure
-  server.close rescue nil
+end
+
+def server login, password, options 
+  mbox = Mbox.new login, password
+  daemon = MboxDaemon.new mbox
+  begin
+    daemon.run options
+  rescue => e
+    puts " ## #{e}\n--- #{e.backtrace.join "\n    "}"
+  end
 end
 
 # args: login, options: date
@@ -161,6 +207,11 @@ usage: #{__FILE__} <task> <username>
 end
 
 __END__
+
+        #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
+        #client.puts headers  # Send the time to the client
+        #puts ">>>> #{headers}"
+
 =begin
 def number_of_mail_in_folder mbox, folder
   mbox.examine folder
