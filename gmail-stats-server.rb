@@ -122,7 +122,11 @@ class MboxDaemon
     loop do # Servers run forever
       client = server.accept # one client at a time
       puts " -- #{Time.now} accept: #{client.addr}" 
-      (serve client, options)
+      begin
+        (serve client, options)
+      rescue => e
+        puts " ## #{e}\n--- #{e.backtrace.join "\n    "}"
+      end
     end
   ensure
     server.close rescue nil
@@ -167,11 +171,7 @@ end
 def server login, password, options 
   mbox = Mbox.new login, password
   daemon = MboxDaemon.new mbox
-  begin
-    daemon.run options
-  rescue => e
-    puts " ## #{e}\n--- #{e.backtrace.join "\n    "}"
-  end
+  daemon.run options
 end
 
 # args: login, options: date
