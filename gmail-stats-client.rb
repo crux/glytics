@@ -6,7 +6,7 @@ require 'socket'
 require 'applix'
 
 Defaults = {
-  :host => 'sebrink.de', :port => 2013, 
+  :host => '127.0.0.1', :port => 2013, 
 }
 
 # args: login, options: host, port
@@ -17,6 +17,12 @@ def main args, options = {}
   sock.puts(args.join ' ')
   result = sock.gets.strip
   puts "result: #{result}"
+
+  if db_path = options[:db]
+    db = (File.open(db_path) { |fd| YAML.load fd }) rescue []
+    (db << result).sort!
+    File.open(db_path, "w") { |fd| fd.write db.to_yaml }
+  end
 end
 
 params = Hash.from_argv ARGV
