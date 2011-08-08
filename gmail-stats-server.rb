@@ -120,10 +120,10 @@ class MboxDaemon
     puts "gmail stats server.."
     server = TCPServer.new(options[:interface], options[:port])  
     loop do # Servers run forever
-      client = server.accept # one client at a time
-      puts " -- #{Time.now} accept: #{client.addr}" 
+      sock = server.accept # one client at a time
+      puts " -- #{Time.now} accept: #{sock.addr}" 
       begin
-        (serve client, options)
+        (serve sock, options)
       rescue => e
         puts " ## #{e}\n--- #{e.backtrace.join "\n    "}"
       end
@@ -132,28 +132,33 @@ class MboxDaemon
     server.close rescue nil
   end
 
-  def serve client, options
-    while request = client.gets
+  def serve sock, options
+    while request = sock.gets
       request = request.strip.split /\s+/
       puts "request: #{request.inspect}"
       case request.shift
-      when /on_date/
+      when /on_date$/
         options[:date] = Date.parse(request.first)
-        report client, options
+        report sock, options
+      when /on_date_range/
+        options[:from_date] = Date.parse(request.shift)
+        options[:to_date] = Date.parse(request.shift)
+        report_range sock, options
       when /yesterday/
-        report client, options
+        report sock, options
       else 
         raise "400 bad request: #{request}"
       end
     end
   ensure
-    client.close rescue nil
+    sock.puts ''
+    sock.close rescue nil
     puts "session closed"
   end
 
-  def report client, options
+  def report sock, options
     #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
-    #client.puts headers  # Send the time to the client
+    #sock.puts headers  # Send the time to the sock
     #puts ">>>> #{headers}"
     date = options[:date]
     values = [
@@ -163,8 +168,18 @@ class MboxDaemon
       (@queries.number_of_archived_mails date),
       (@queries.total_number_of_starred_mails date+1)
     ]
-    client.puts(values.join ':')
+    sock.puts(values.join ':')
     #puts ">>>> #{values.join ':'}"
+  end
+
+  def report_range sock, options
+    date = options[:from_date]
+    while date < options[:to_date]
+      puts "on_date: #{date.strftime('%e-%b-%Y')}"
+      options[:date] = date
+      report sock, options
+      date += 1
+    end
   end
 end
 
