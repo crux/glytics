@@ -14,14 +14,16 @@ Defaults = {
 def main args, options = {}
   options = (Defaults.merge options)
   sock = TCPSocket.open options[:host], options[:port]
-  sock.puts(args.join ' ')
-  result = sock.gets.strip
-  puts "result: #{result}"
 
-  if db_path = options[:db]
-    db = (File.open(db_path) { |fd| YAML.load fd }) rescue []
-    (db << result).sort!
-    File.open(db_path, "w") { |fd| fd.write db.to_yaml }
+  request = args.join
+  sock.puts(request)
+  while result = sock.gets.strip
+    puts "result: #{result}"
+    if db_path = options[:db]
+      db = (File.open(db_path) { |fd| YAML.load fd }) rescue []
+      (db << result).sort!
+      File.open(db_path, "w") { |fd| fd.write db.to_yaml }
+    end
   end
 end
 
