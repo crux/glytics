@@ -15,15 +15,30 @@ def main args, options = {}
   options = (Defaults.merge options)
   sock = TCPSocket.open options[:host], options[:port]
 
-  request = args.join
-  sock.puts(request)
-  while result = sock.gets.strip
-    puts "result: #{result}"
-    if db_path = options[:db]
-      db = (File.open(db_path) { |fd| YAML.load fd }) rescue []
-      (db << result).sort!
-      File.open(db_path, "w") { |fd| fd.write db.to_yaml }
+  records = {}
+  if (datafile = options[:db]) and (File.exists? datafile)
+    samples = (File.open(datafile) { |fd| YAML.load fd })
+    samples.each do |sample|
+      date = (sample.split ':').first
+      records[date] = sample
     end
+  end
+
+  request = args.join ' '
+  puts "request: #{request}"
+  sock.puts(request)
+  loop do
+    result = sock.gets.strip
+    break if result.empty?
+    puts "result: #{result}"
+    date = (result.split ':').first
+    records[date] = result
+  end
+  puts 'done.'
+
+  if datafile
+    values = records.values.sort
+    File.open(datafile, "w") { |fd| fd.write values.to_yaml }
   end
 end
 
