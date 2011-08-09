@@ -149,9 +149,9 @@ class MboxDaemon
       else 
         raise "400 bad request: #{request}"
       end
+      sock.puts '' rescue nil
     end
   ensure
-    sock.puts ''
     sock.close rescue nil
     puts "session closed"
   end
