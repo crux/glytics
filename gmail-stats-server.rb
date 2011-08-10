@@ -118,18 +118,21 @@ class MboxDaemon
 
   def run options
     puts "gmail stats server.."
-    server = TCPServer.new(options[:interface], options[:port])  
     loop do # Servers run forever
+      server = TCPServer.new(options[:interface], options[:port])  
       sock = server.accept # one client at a time
       puts " -- #{Time.now} accept: #{sock.addr}" 
       begin
         (serve sock, options)
       rescue => e
-        puts " ## #{e}\n--- #{e.backtrace.join "\n    "}"
+        puts " ## #{e} ##\n    #{e.backtrace.join "\n    "}"
+      ensure
+        sock.close rescue nil
+        puts "session closed"
+        server.close rescue nil
       end
     end
   ensure
-    server.close rescue nil
   end
 
   def serve sock, options
@@ -151,9 +154,6 @@ class MboxDaemon
       end
       sock.puts '' rescue nil
     end
-  ensure
-    sock.close rescue nil
-    puts "session closed"
   end
 
   def report sock, options
