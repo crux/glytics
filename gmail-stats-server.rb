@@ -16,6 +16,43 @@ Defaults = {
   :interface => '127.0.0.1', :port => 2013, 
 }
 
+class Gmail
+  def initialize username, password
+    #super 'imap.gmail.com', '993', true
+    @username, @password = username, password
+  end
+
+  # yields IMAP session object into block and returnsblock result
+  def session &blk
+    @session and (raise 'concurrent sessions not allowed')
+    @session = (Net::IMAP.new 'imap.gmail.com', '993', true)
+    @session.login @username, @password
+    yield self
+  ensure
+    @session = nil
+    #logout rescue nil
+  end
+
+  def folders
+    @session.list '', '[Gmail]/%'
+  end
+
+  # returns mail UID list
+  def mails_in_folder_on_given_date folder, date
+    @session.examine folder
+    #condition = (date.nil? && ['all'] || ['ON', date.strftime '%e-%b-%Y']
+    uids = @session.uid_search ['ON', date.strftime('%e-%b-%Y')]
+    #puts "#{uids.size} mails in #{folder} on #{date_s}"
+  end
+
+  # returns mail UID list
+  def mails_in_folder_before_given_date folder, date
+    @session.examine folder
+    uids = @session.uid_search ['BEFORE', date.strftime('%e-%b-%Y')]
+    #puts "#{uids.size} mails in #{folder} on #{date_s}"
+  end
+end
+
 class MboxQueries 
   def initialize mbox
     @mbox = mbox
@@ -38,82 +75,9 @@ class MboxQueries
   end
 end
 
-class Mbox < Net::IMAP
-  def initialize username, password
-    super 'imap.gmail.com', '993', true
-    @username, @password = username, password
-    login username, password
-  end
-
-  def queries
-    @queries ||= MboxQueries.new self
-  end
-
-  def folders
-    @folders = self.list '', '[Gmail]/%'
-  end
-
-  # returns mail UID list
-  def mails_in_folder_on_given_date folder, date
-    examine folder
-    #condition = (date.nil? && ['all'] || ['ON', date.strftime '%e-%b-%Y']
-    uids = uid_search ['ON', date.strftime('%e-%b-%Y')]
-    #puts "#{uids.size} mails in #{folder} on #{date_s}"
-  end
-
-  def mails_in_folder_before_given_date folder, date
-    examine folder
-    uids = uid_search ['BEFORE', date.strftime('%e-%b-%Y')]
-    #puts "#{uids.size} mails in #{folder} on #{date_s}"
-  end
-
-  def self.fetch_and_dump uids
-    attr = %w{UID RFC822 ENVELOPE}
-    uid_fetch(uids, attr).each do |fd| 
-      #msg = fd.attr['RFC822']
-      #puts "-->#{fd.attr['RFC822']}<--"
-      #puts "-#{fd} :: #{fd.attr['UID']}-"
-      puts "- #{fd.attr['UID']} -"
-      e = fd.attr['ENVELOPE']
-      puts <<-EOT
-message_id:  #{e.message_id}
-subject:     #{e.subject}
-date:        #{e.date}
-from:        #{e.from.first}
-sender:      #{e.sender}
-reply_to:    #{e.reply_to}
-to:          #{e.to}
-cc:          #{e.cc}
-bcc:         #{e.bcc}
-in_reply_to: #{e.in_reply_to}
-      EOT
-    end
-  #sender:      #{[:name, :route, :mailbox, :host].map {|x| e.sender.send x}}
-  #yield data 
-  end
-end
-
-def report login, password, options 
-  mbox = Mbox.new login, password
-  #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
-
-  q = MboxQueries.new mbox
-
-  date = options[:date]
-  puts <<-EOR
- -- mails stats for #{date}
-       deleted: #{q.number_of_deleted_mails date}
-          sent: #{q.number_of_sent_mails date}
-      archived: #{q.number_of_archived_mails date}
-starred(total): #{q.total_number_of_starred_mails date+1}
-  EOR
-end
-
-class MboxDaemon 
-
-  def initialize mbox
-    @mbox = mbox
-    @queries = @mbox.queries
+class MboxDaemon
+  def initialize gmail
+    @gmail = gmail
   end
 
   def run options
@@ -161,13 +125,16 @@ class MboxDaemon
     #sock.puts headers  # Send the time to the sock
     #puts ">>>> #{headers}"
     date = options[:date]
-    values = [
-      date,
-      (@queries.number_of_deleted_mails date),
-      (@queries.number_of_sent_mails date),
-      (@queries.number_of_archived_mails date),
-      (@queries.total_number_of_starred_mails date+1)
-    ]
+    values = @gmail.session do |gmail|
+        q = MboxQueries.new(gmail)
+        [ 
+          date,
+          (q.number_of_deleted_mails date),
+          (q.number_of_sent_mails date),
+          (q.number_of_archived_mails date),
+          (q.total_number_of_starred_mails date+1)
+        ]
+    end
     sock.puts(values.join ':')
     #puts ">>>> #{values.join ':'}"
   end
@@ -183,13 +150,27 @@ class MboxDaemon
   end
 end
 
-def server login, password, options 
-  mbox = Mbox.new login, password
-  daemon = MboxDaemon.new mbox
+def server username, password, options 
+  daemon = MboxDaemon.new(Gmail.new username, password)
   daemon.run options
 end
 
-# args: login, options: date
+def report username, password, options 
+  #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
+  (Gmail.new username, password).session do |gmail|
+    q = MboxQueries.new gmail
+    date = options[:date]
+    puts <<-EOR
+ -- mails stats for #{date}
+       deleted: #{q.number_of_deleted_mails date}
+          sent: #{q.number_of_sent_mails date}
+      archived: #{q.number_of_archived_mails date}
+starred(total): #{q.total_number_of_starred_mails date+1}
+    EOR
+  end
+end
+
+# args: username, options: date
 #
 def main args, options = {}
   options = (Defaults.merge options)
@@ -200,11 +181,11 @@ def main args, options = {}
   # account is an command line arg but password is prompted, never have that in
   # a config or on the command line!
   #
-  login = args.shift # or raise "no username"
+  username = args.shift # or raise "no username"
   password = prompt_for_password
 
   # which method to run depend on first command line argument..
-  send action, login, password, options
+  send action, username, password, options
 end
 
 params = Hash.from_argv ARGV
@@ -223,69 +204,31 @@ end
 
 __END__
 
-        #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
-        #client.puts headers  # Send the time to the client
-        #puts ">>>> #{headers}"
+  #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
+  #client.puts headers  # Send the time to the client
+  #puts ">>>> #{headers}"
 
-=begin
-def number_of_mail_in_folder mbox, folder
-  mbox.examine folder
-  uids = mbox.uid_search ['all']
-  puts "#{uids.size} mails in #{folder}"
-  uids.size
-end
-
-def number_of_mail_in_starred mbox
-  number_of_mail_in_folder mbox, folder = '[Gmail]/Starred'
-end
-
-def number_of_mails_in_folder_on_given_date mbox, args = {}
-  folder = (args[:folder] || '[Gmail]/All Mail')
-  date = (args[:date] || (Date.today - 1))
-
-  mbox.examine folder
-  date_s = date.strftime "%e-%b-%Y"
-  uids = mbox.uid_search(['ON', date_s])
-  puts "#{uids.size} mails in #{folder} on #{date_s}"
-  uids.size
-end
-
-def number_of_mails_sent_yesterday mbox
-  number_of_mails_in_folder_on_given_date(
-    mbox, :date => (Date.today - 1), :folder => '[Gmail]/Sent Mail'
-  )
-end
-
-def number_of_mails_archived_yesterday mbox
-  number_of_mails_in_folder_on_given_date(
-    mbox, :date => (Date.today - 1), :folder => '[Gmail]/All Mail'
-  )
-end
-
-def number_of_mails_deleted_yesterday mbox
-  number_of_mails_in_folder_on_given_date(
-    mbox, :date => (Date.today - 1), :folder => '[Gmail]/Trash'
-  )
-end
-=end
-__END__
-p folders.select { |f| f.name == '[Gmail]' }
-
-mbox.examine 'Sent Messages'
-uids = mbox.uid_search(['ON', '19-Jun-2011'])
-puts "uid count: #{uids.size}"
-
-imap = Net::IMAP.new 'imap.gmail.com', '993', true
-imap.login account[:login], account[:password]
-
-#imap.examine 'INBOX'
-imap.examine '[Gmail]/Sent Mail'
-# Loop through all messages in the source folder.
-#uids = imap.uid_search(['ALL'])zmessenfinan:b 
-#uids = imap.uid_search(['NOT', 'DELETED'])
-uids = imap.uid_search(['ON', '19-Jun-2011'])
-puts "uid count: #{uids.size}"
-exit if uids.empty?
-
-attr = %w{UID RFC822 ENVELOPE}
-imap.uid_fetch(uids, attr).each { |fd| dump_fetch_data fd }
+  def self.fetch_and_dump uids
+    attr = %w{UID RFC822 ENVELOPE}
+    uid_fetch(uids, attr).each do |fd| 
+      #msg = fd.attr['RFC822']
+      #puts "-->#{fd.attr['RFC822']}<--"
+      #puts "-#{fd} :: #{fd.attr['UID']}-"
+      puts "- #{fd.attr['UID']} -"
+      e = fd.attr['ENVELOPE']
+      puts <<-EOT
+message_id:  #{e.message_id}
+subject:     #{e.subject}
+date:        #{e.date}
+from:        #{e.from.first}
+sender:      #{e.sender}
+reply_to:    #{e.reply_to}
+to:          #{e.to}
+cc:          #{e.cc}
+bcc:         #{e.bcc}
+in_reply_to: #{e.in_reply_to}
+      EOT
+    end
+  #sender:      #{[:name, :route, :mailbox, :host].map {|x| e.sender.send x}}
+  #yield data 
+  end
