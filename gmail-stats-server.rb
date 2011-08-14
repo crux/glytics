@@ -70,8 +70,8 @@ class MboxQueries
     (@mbox.mails_in_folder_on_given_date '[Gmail]/All Mail', on_date).size
   end
 
-  def total_number_of_starred_mails before_date
-    (@mbox.mails_in_folder_before_given_date '[Gmail]/Starred', before_date).size
+  def total_number_of_starred_mails on_date
+    (@mbox.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
   end
 end
 
@@ -132,7 +132,7 @@ class MboxDaemon
           (q.number_of_deleted_mails date),
           (q.number_of_sent_mails date),
           (q.number_of_archived_mails date),
-          (q.total_number_of_starred_mails date+1)
+          (q.total_number_of_starred_mails date)
         ]
     end
     sock.puts(values.join ':')
@@ -165,7 +165,7 @@ def report username, password, options
        deleted: #{q.number_of_deleted_mails date}
           sent: #{q.number_of_sent_mails date}
       archived: #{q.number_of_archived_mails date}
-starred(total): #{q.total_number_of_starred_mails date+1}
+starred(total): #{q.total_number_of_starred_mails date}
     EOR
   end
 end
