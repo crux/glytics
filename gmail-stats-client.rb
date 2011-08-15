@@ -55,4 +55,3 @@ usage: #{__FILE__} <task> <username>
 --- #{e.backtrace.join "\n    "}
   EOT
 end
-
