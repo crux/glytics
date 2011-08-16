@@ -1,3 +1,3 @@
 source "http://rubygems.org"
 
-gem "applix", "~> 0.3.4"
+gem "applix", "~> 0.3.5"
