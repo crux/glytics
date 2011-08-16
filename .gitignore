@@ -1,2 +1,8 @@
 out.yml
 *.log
+*.sw?
+Gemfile.lock
+.DS_Store
+coverage
+rdoc
+pkg
