@@ -7,10 +7,6 @@ require 'socket'
 require 'highline/import'
 require 'applix'
 
-def prompt_for_password prompt = 'enter password: '
-  ask(prompt) {|q| q.echo = '*'}
-end
-
 Defaults = {
   :date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
   :interface => '127.0.0.1', :port => 2013, 
@@ -38,12 +34,25 @@ class Gmail
   end
 
   # returns mail UID list
-  def mails_in_folder_on_given_date folder, date
+  def _mails_in_folder_on_given_date folder, date
     @session.examine folder
     #condition = (date.nil? && ['all'] || ['ON', date.strftime '%e-%b-%Y']
     uids = @session.uid_search ['ON', date.strftime('%e-%b-%Y')]
     #puts "#{uids.size} mails in #{folder} on #{date_s}"
   end
+  def mails_in_folder_on_given_date folder, start_date, end_date = nil
+    @session.examine folder
+    if end_date
+      t0 = (start_date - 1).strftime('%e-%b-%Y')
+      t1 = end_date.strftime('%e-%b-%Y')
+      uids = @session.uid_search ['AFTER', t0, 'BEFORE', t1]
+    else
+      date = start_date
+      uids = @session.uid_search ['ON', date.strftime('%e-%b-%Y')]
+    end
+    #puts "#{uids.size} mails in #{folder} on #{date_s}"
+  end
+
 
   # returns mail UID list
   def mails_in_folder_before_given_date folder, date
@@ -73,6 +82,16 @@ class MboxQueries
   def total_number_of_starred_mails on_date
     (@mbox.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
   end
+
+  def report_on_date date, options
+    [
+      date,
+      (number_of_deleted_mails date),
+      (number_of_sent_mails date),
+      (number_of_archived_mails date),
+      (total_number_of_starred_mails date)
+    ]
+  end
 end
 
 class MboxDaemon
@@ -85,7 +104,7 @@ class MboxDaemon
     loop do # Servers run forever
       server = TCPServer.new(options[:interface], options[:port])  
       sock = server.accept # one client at a time
-      puts " -- #{Time.now} accept: #{sock.addr}" 
+      puts " -- #{Time.now}\naccept: #{sock.addr}" 
       begin
         (serve sock, options)
       rescue => e
@@ -121,24 +140,20 @@ class MboxDaemon
   end
 
   def report sock, options
-    #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
-    #sock.puts headers  # Send the time to the sock
-    #puts ">>>> #{headers}"
     date = options[:date]
-    values = @gmail.session do |gmail|
-        q = MboxQueries.new(gmail)
-        [ 
-          date,
-          (q.number_of_deleted_mails date),
-          (q.number_of_sent_mails date),
-          (q.number_of_archived_mails date),
-          (q.total_number_of_starred_mails date)
-        ]
+    values = @gmail.session do |gmail| 
+      MboxQueries.new(gmail).report_on_date date, options 
+        #[ 
+        #  date,
+        #  (q.number_of_deleted_mails date),
+        #  (q.number_of_sent_mails date),
+        #  (q.number_of_archived_mails date),
+        #  (q.total_number_of_starred_mails date)
+        #]
     end
     sock.puts(values.join ':')
-    #puts ">>>> #{values.join ':'}"
   end
-
+    
   def report_range sock, options
     date = options[:from_date]
     while date < options[:to_date]
@@ -150,85 +165,33 @@ class MboxDaemon
   end
 end
 
-def server username, password, options 
-  daemon = MboxDaemon.new(Gmail.new username, password)
-  daemon.run options
-end
+Applix.main(ARGV, Defaults) do 
+  pre_handle do |*_, options|
+    # account is an command line arg but password is prompted, never have that
+    # in a config or on the command line!
+    @password = ask('enter password: ') {|q| q.echo = '*'}
 
-def report username, password, options 
-  #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
-  (Gmail.new username, password).session do |gmail|
-    q = MboxQueries.new gmail
-    date = options[:date]
-    puts <<-EOR
+    # needs to up-type string date because it could come from command line
+    options[:date] = Date.parse(options[:date])
+  end
+
+  handle(:server) do |username, options|
+    daemon = MboxDaemon.new(Gmail.new username, @password)
+    daemon.run options
+  end
+
+  handle(:report) do |username, options|
+    #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
+    (Gmail.new username, @password).session do |gmail|
+      q = MboxQueries.new gmail
+      date = options[:date]
+      puts <<-EOR
  -- mails stats for #{date}
        deleted: #{q.number_of_deleted_mails date}
           sent: #{q.number_of_sent_mails date}
       archived: #{q.number_of_archived_mails date}
 starred(total): #{q.total_number_of_starred_mails date}
     EOR
-  end
-end
-
-# args: username, options: date
-#
-def main args, options = {}
-  options = (Defaults.merge options)
-  options[:date] = Date.parse(options[:date]) # up-type string date
-
-  action = args.shift or raise "no action"
-
-  # account is an command line arg but password is prompted, never have that in
-  # a config or on the command line!
-  #
-  username = args.shift # or raise "no username"
-  password = prompt_for_password
-
-  # which method to run depend on first command line argument..
-  send action, username, password, options
-end
-
-params = Hash.from_argv ARGV
-begin 
-  main params[:args], params
-rescue => e
-  puts <<-EOT
-
-## #{e}
-
-usage: #{__FILE__} <task> <username>
-
---- #{e.backtrace.join "\n    "}
-  EOT
-end
-
-__END__
-
-  #headers = "HTTP/1.1 200 OK\r\nServer: Ruby\r\nContent-Type: text/html; charset=iso-8859-1\r\n\r\n"
-  #client.puts headers  # Send the time to the client
-  #puts ">>>> #{headers}"
-
-  def self.fetch_and_dump uids
-    attr = %w{UID RFC822 ENVELOPE}
-    uid_fetch(uids, attr).each do |fd| 
-      #msg = fd.attr['RFC822']
-      #puts "-->#{fd.attr['RFC822']}<--"
-      #puts "-#{fd} :: #{fd.attr['UID']}-"
-      puts "- #{fd.attr['UID']} -"
-      e = fd.attr['ENVELOPE']
-      puts <<-EOT
-message_id:  #{e.message_id}
-subject:     #{e.subject}
-date:        #{e.date}
-from:        #{e.from.first}
-sender:      #{e.sender}
-reply_to:    #{e.reply_to}
-to:          #{e.to}
-cc:          #{e.cc}
-bcc:         #{e.bcc}
-in_reply_to: #{e.in_reply_to}
-      EOT
     end
-  #sender:      #{[:name, :route, :mailbox, :host].map {|x| e.sender.send x}}
-  #yield data 
   end
+end
