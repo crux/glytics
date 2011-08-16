@@ -7,11 +7,6 @@ require 'socket'
 require 'highline/import'
 require 'applix'
 
-Defaults = {
-  :date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
-  :interface => '127.0.0.1', :port => 2013, 
-}
-
 class Gmail
   def initialize username, password
     #super 'imap.gmail.com', '993', true
@@ -126,10 +121,10 @@ class MboxDaemon
       when /on_date$/
         options[:date] = Date.parse(request.first)
         report sock, options
-      when /on_date_range/
+      when /on_date_sequence/
         options[:from_date] = Date.parse(request.shift)
         options[:to_date] = Date.parse(request.shift)
-        report_range sock, options
+        report_sequence sock, options
       when /yesterday/
         report sock, options
       else 
@@ -143,18 +138,11 @@ class MboxDaemon
     date = options[:date]
     values = @gmail.session do |gmail| 
       MboxQueries.new(gmail).report_on_date date, options 
-        #[ 
-        #  date,
-        #  (q.number_of_deleted_mails date),
-        #  (q.number_of_sent_mails date),
-        #  (q.number_of_archived_mails date),
-        #  (q.total_number_of_starred_mails date)
-        #]
     end
     sock.puts(values.join ':')
   end
     
-  def report_range sock, options
+  def report_sequence sock, options
     date = options[:from_date]
     while date < options[:to_date]
       puts "on_date: #{date.strftime('%e-%b-%Y')}"
@@ -165,8 +153,13 @@ class MboxDaemon
   end
 end
 
+Defaults = {
+  :date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
+  :interface => '127.0.0.1', :port => 2013, 
+}
+
 Applix.main(ARGV, Defaults) do 
-  pre_handle do |*_, options|
+  prolog do |*_, options|
     # account is an command line arg but password is prompted, never have that
     # in a config or on the command line!
     @password = ask('enter password: ') {|q| q.echo = '*'}
