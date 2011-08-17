@@ -11,17 +11,18 @@ Defaults = {
 
 Applix.main(ARGV, Defaults) do 
 
-  any do |*args, options|
-
-    records = {}
-    if (datafile = options[:db]) and (File.exists? datafile)
-      samples = (File.open(datafile) { |fd| YAML.load fd })
+  prolog do |*args, options|
+    @records = {}
+    if (@datafile = options[:db]) and (File.exists? @datafile)
+      samples = (File.open(@datafile) { |fd| YAML.load fd })
       samples.each do |sample|
         date = (sample.split ':').first
-        records[date] = sample
+        @records[date] = sample
       end
     end
+  end
 
+  any do |*args, options|
     request = args.join ' '
     puts "request: #{request}"
     sock = TCPSocket.open options[:host], options[:port]
@@ -31,62 +32,15 @@ Applix.main(ARGV, Defaults) do
       break if result.empty?
       puts "result: #{result}"
       date = (result.split ':').first
-      records[date] = result
+      @records[date] = result
     end
     puts 'done.'
+  end
 
-    if datafile
-      values = records.values.sort
-      File.open(datafile, "w") { |fd| fd.write values.to_yaml }
+  epilog do
+    if @datafile
+      values = @records.values.sort
+      File.open(@datafile, "w") { |fd| fd.write values.to_yaml }
     end
   end
-end
-
-__END__
-
-# args: login, options: host, port
-#
-def main args, options = {}
-  options = (Defaults.merge options)
-  sock = TCPSocket.open options[:host], options[:port]
-
-  records = {}
-  if (datafile = options[:db]) and (File.exists? datafile)
-    samples = (File.open(datafile) { |fd| YAML.load fd })
-    samples.each do |sample|
-      date = (sample.split ':').first
-      records[date] = sample
-    end
-  end
-
-  request = args.join ' '
-  puts "request: #{request}"
-  sock.puts(request)
-  loop do
-    result = sock.gets.strip
-    break if result.empty?
-    puts "result: #{result}"
-    date = (result.split ':').first
-    records[date] = result
-  end
-  puts 'done.'
-
-  if datafile
-    values = records.values.sort
-    File.open(datafile, "w") { |fd| fd.write values.to_yaml }
-  end
-end
-
-params = Hash.from_argv ARGV
-begin 
-  main params[:args], params
-rescue => e
-  puts <<-EOT
-
-## #{e}
-
-usage: #{__FILE__} <task> <username>
-
---- #{e.backtrace.join "\n    "}
-  EOT
 end
