@@ -159,23 +159,26 @@ Defaults = {
 }
 
 Applix.main(ARGV, Defaults) do 
-  prolog do |*_, options|
+  prolog do |args, options|
     # account is an command line arg but password is prompted, never have that
     # in a config or on the command line!
     @password = ask('enter password: ') {|q| q.echo = '*'}
+
+    (username = args.shift) or raise 'no username?'
+    @gmail = Gmail.new(username, @password)
 
     # needs to up-type string date because it could come from command line
     options[:date] = Date.parse(options[:date])
   end
 
   handle(:server) do |username, options|
-    daemon = MboxDaemon.new(Gmail.new username, @password)
+    daemon = MboxDaemon.new(@gmail)
     daemon.run options
   end
 
   handle(:report) do |username, options|
     #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
-    (Gmail.new username, @password).session do |gmail|
+    @gmail.session do |gmail|
       q = MboxQueries.new gmail
       date = options[:date]
       puts <<-EOR
