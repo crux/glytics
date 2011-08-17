@@ -179,12 +179,12 @@ Applix.main(ARGV, Defaults) do
     options[:date] = Date.parse(options[:date])
   end
 
-  handle(:server) do |username, options|
+  handle(:server) do |options|
     daemon = MboxDaemon.new(@gmail)
     daemon.run options
   end
 
-  handle(:report) do |username, options|
+  handle(:report) do |options|
     #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
     @gmail.session do |gmail|
       date = options[:date]
@@ -199,7 +199,7 @@ starred(total): #{values[4]}
     end
   end
 
-  handle(:date_range) do |from_date, to_date, username, options|
+  handle(:date_range) do |from_date, to_date, options|
     # begin and end of date range
     from_date = Date.parse(from_date)
     to_date = Date.parse(to_date)
