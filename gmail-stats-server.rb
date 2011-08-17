@@ -29,18 +29,12 @@ class Gmail
   end
 
   # returns mail UID list
-  def _mails_in_folder_on_given_date folder, date
-    @session.examine folder
-    #condition = (date.nil? && ['all'] || ['ON', date.strftime '%e-%b-%Y']
-    uids = @session.uid_search ['ON', date.strftime('%e-%b-%Y')]
-    #puts "#{uids.size} mails in #{folder} on #{date_s}"
-  end
   def mails_in_folder_on_given_date folder, start_date, end_date = nil
     @session.examine folder
     if end_date
-      t0 = (start_date - 1).strftime('%e-%b-%Y')
-      t1 = end_date.strftime('%e-%b-%Y')
-      uids = @session.uid_search ['AFTER', t0, 'BEFORE', t1]
+      t1 = start_date.strftime('%e-%b-%Y')
+      t2 = (end_date + 1).strftime('%e-%b-%Y')
+      uids = @session.uid_search ['BEFORE', t2, 'SINCE', t1]
     else
       date = start_date
       uids = @session.uid_search ['ON', date.strftime('%e-%b-%Y')]
@@ -62,23 +56,33 @@ class MboxQueries
     @mbox = mbox
   end
 
-  def number_of_deleted_mails on_date
-    (@mbox.mails_in_folder_on_given_date '[Gmail]/Trash', on_date).size
+  def number_of_deleted_mails t1, t2 = nil
+    (@mbox.mails_in_folder_on_given_date '[Gmail]/Trash', t1, t2).size
   end
 
-  def number_of_sent_mails on_date
-    (@mbox.mails_in_folder_on_given_date '[Gmail]/Sent Mail', on_date).size
+  def number_of_sent_mails t1, t2 = nil
+    (@mbox.mails_in_folder_on_given_date '[Gmail]/Sent Mail', t1, t2).size
   end
 
-  def number_of_archived_mails on_date
-    (@mbox.mails_in_folder_on_given_date '[Gmail]/All Mail', on_date).size
+  def number_of_archived_mails t1, t2 = nil
+    (@mbox.mails_in_folder_on_given_date '[Gmail]/All Mail', t1, t2).size
   end
 
   def total_number_of_starred_mails on_date
     (@mbox.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
   end
 
-  def report_on_date date, options
+  def report_range from_date, to_date
+    [
+      from_date, to_date,
+      (number_of_deleted_mails from_date, to_date),
+      (number_of_sent_mails from_date, to_date),
+      (number_of_archived_mails from_date, to_date),
+      (total_number_of_starred_mails to_date)
+    ]
+  end
+
+  def report_on_date date
     [
       date,
       (number_of_deleted_mails date),
@@ -121,6 +125,10 @@ class MboxDaemon
       when /on_date$/
         options[:date] = Date.parse(request.first)
         report sock, options
+      when /in_range/
+        options[:from_date] = Date.parse(request.shift)
+        options[:to_date] = Date.parse(request.shift)
+        report_range sock, options
       when /on_date_sequence/
         options[:from_date] = Date.parse(request.shift)
         options[:to_date] = Date.parse(request.shift)
@@ -137,7 +145,7 @@ class MboxDaemon
   def report sock, options
     date = options[:date]
     values = @gmail.session do |gmail| 
-      MboxQueries.new(gmail).report_on_date date, options 
+      MboxQueries.new(gmail).report_on_date date
     end
     sock.puts(values.join ':')
   end
@@ -179,15 +187,31 @@ Applix.main(ARGV, Defaults) do
   handle(:report) do |username, options|
     #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
     @gmail.session do |gmail|
-      q = MboxQueries.new gmail
       date = options[:date]
+      values = MboxQueries.new(gmail).report_on_date(date)
       puts <<-EOR
- -- mails stats for #{date}
-       deleted: #{q.number_of_deleted_mails date}
-          sent: #{q.number_of_sent_mails date}
-      archived: #{q.number_of_archived_mails date}
-starred(total): #{q.total_number_of_starred_mails date}
-    EOR
+ -- mails stats for #{values[0]}
+       deleted: #{values[1]}
+          sent: #{values[2]}
+      archived: #{values[3]}
+starred(total): #{values[4]}
+      EOR
+    end
+  end
+
+  handle(:date_range) do |from_date, to_date, username, options|
+    # begin and end of date range
+    from_date = Date.parse(from_date)
+    to_date = Date.parse(to_date)
+    @gmail.session do |gmail|
+      values = MboxQueries.new(gmail).report_range(from_date, to_date)
+      puts <<-EOR
+ -- mails stats for #{values[0]} - #{values[1]}
+       deleted: #{values[2]}
+          sent: #{values[3]}
+      archived: #{values[4]}
+starred(total): #{values[5]}
+      EOR
     end
   end
 end
