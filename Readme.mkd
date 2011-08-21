@@ -1,0 +1,13 @@
+# glytics: analytics for your gmail inbox
+
+Every wondered what you did last summer? last week, month or year? Where did
+all the time go? Enter glytics:
+
+    $ glytics <you>@gmail.com report in_period 2010-01-01 2011-01-01
+    :in_period: {:name=>:in_period, :first_day=>"2010-01-01",
+    :last_day=>"2011-01-01", :trashed=>4, :sent=>2313, :archived=>20346,
+    :starred=>4}
+
+_glytics_ will report your: sent, arrchived, deleted and starred mail.  
+
+TODO: explain on what is actually reported, 
