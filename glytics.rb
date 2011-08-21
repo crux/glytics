@@ -143,48 +143,6 @@ class Gmail
   end
 end
 
-class MboxQueries 
-  def initialize session
-    @session = session
-  end
-
-  def number_of_deleted_mails t1, t2 = nil
-    (@session.mails_in_folder_on_given_date '[Gmail]/Trash', t1, t2).size
-  end
-
-  def number_of_sent_mails t1, t2 = nil
-    (@session.mails_in_folder_on_given_date '[Gmail]/Sent Mail', t1, t2).size
-  end
-
-  def number_of_archived_mails t1, t2 = nil
-    (@session.mails_in_folder_on_given_date '[Gmail]/All Mail', t1, t2).size
-  end
-
-  def total_number_of_starred_mails on_date
-    (@session.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
-  end
-
-  def report_range from_date, to_date
-    [
-      from_date, to_date,
-      (number_of_deleted_mails from_date, to_date),
-      (number_of_sent_mails from_date, to_date),
-      (number_of_archived_mails from_date, to_date),
-      (total_number_of_starred_mails to_date)
-    ]
-  end
-
-  def report_on_date date
-    [
-      date,
-      (@session.in_trash { on_given_date date }).size,
-      (@session.in_sent { on_given_date date }).size,
-      (@session.in_archived { on_given_date date }).size,
-      (@session.in_starred { before_given_date date+1 }).size,
-    ]
-  end
-end
-
 class MboxDaemon
   def initialize gmail
     @gmail = gmail
@@ -206,10 +164,63 @@ class MboxDaemon
         server.close rescue nil
       end
     end
-  ensure
   end
 
   def serve sock, options
+    while request = sock.gets
+      args = request.strip.split /\s+/
+      puts "request: #{args.inspect}"
+      report = args.shift
+      result = @gmail.report.send(report, *args, options)
+      #puts ":#{report}: #{result.inspect}"
+      sock.puts(result.inspect)
+      sock.puts '' rescue nil
+    end
+  end
+end
+
+Defaults = {
+  #:date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
+  :interface => '127.0.0.1', :port => 2013, 
+}
+
+Applix.main(ARGV, Defaults) do 
+  prolog do |args, options|
+    # account is an command line arg but password is prompted, never have that
+    # in a config or on the command line!
+    @password = ask('enter password: ') {|q| q.echo = '*'}
+
+    (username = args.shift) or raise 'no username?'
+    @gmail = Gmail.new(username, @password)
+  end
+
+  handle(:server) do |*_, options|
+    daemon = MboxDaemon.new(@gmail)
+    daemon.run options
+  end
+
+  handle(:report) do |*args, options|
+    puts "report: #{args.inspect}, #{options.inspect}"
+    report = args.shift
+    result = @gmail.report.send(report, *args, options)
+    puts ":#{report}: #{result.inspect}"
+  end
+
+  any do |*args, options|
+    puts "any: #{args.inspect}, #{options.inspect}"
+    report = args.shift
+    result = @gmail.report.send(report, *args, options)
+    puts ":#{report}: #{result.inspect}"
+  end
+
+  epilog do |rc, args, options|
+    # hmmm, generalizing the reporting down here?
+  end
+end
+
+__END__
+
+  def serve_ sock, options
     while request = sock.gets
       request = request.strip.split /\s+/
       puts "request: #{request.inspect}"
@@ -251,43 +262,45 @@ class MboxDaemon
       date += 1
     end
   end
-end
 
-Defaults = {
-  #:date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
-  :interface => '127.0.0.1', :port => 2013, 
-}
-
-Applix.main(ARGV, Defaults) do 
-  prolog do |args, options|
-    # account is an command line arg but password is prompted, never have that
-    # in a config or on the command line!
-    @password = ask('enter password: ') {|q| q.echo = '*'}
-
-    (username = args.shift) or raise 'no username?'
-    @gmail = Gmail.new(username, @password)
+class MboxQueries 
+  def initialize session
+    @session = session
   end
 
-  handle(:server) do 
-    daemon = MboxDaemon.new(@gmail)
-    daemon.run options
+  def number_of_deleted_mails t1, t2 = nil
+    (@session.mails_in_folder_on_given_date '[Gmail]/Trash', t1, t2).size
   end
 
-  handle(:report) do |*args, options|
-    puts "report: #{args.inspect}, #{options.inspect}"
-    report = args.shift
-    result = @gmail.report.send(report, *args, options)
-    puts ":#{report}: #{result.inspect}"
+  def number_of_sent_mails t1, t2 = nil
+    (@session.mails_in_folder_on_given_date '[Gmail]/Sent Mail', t1, t2).size
   end
 
-  any do |*args, options|
-    puts "any: #{args.inspect}, #{options.inspect}"
-    report = args.shift
-    result = @gmail.report.send(report, *args, options)
-    puts ":#{report}: #{result.inspect}"
+  def number_of_archived_mails t1, t2 = nil
+    (@session.mails_in_folder_on_given_date '[Gmail]/All Mail', t1, t2).size
   end
 
-  epilog do |rc, args, options|
-    # hmmm, generalizing the reporting down here?
+  def total_number_of_starred_mails on_date
+    (@session.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
+  end
+
+  def report_range from_date, to_date
+    [
+      from_date, to_date,
+      (number_of_deleted_mails from_date, to_date),
+      (number_of_sent_mails from_date, to_date),
+      (number_of_archived_mails from_date, to_date),
+      (total_number_of_starred_mails to_date)
+    ]
+  end
+
+  def report_on_date date
+    [
+      date,
+      (@session.in_trash { on_given_date date }).size,
+      (@session.in_sent { on_given_date date }).size,
+      (@session.in_archived { on_given_date date }).size,
+      (@session.in_starred { before_given_date date+1 }).size,
+    ]
   end
 end
