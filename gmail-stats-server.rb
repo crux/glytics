@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'rubygems'
-require 'yaml'
+require 'date'
 require 'net/imap'
 require 'socket'
 require 'highline/import'
@@ -15,61 +15,153 @@ class Gmail
 
   # yields IMAP session object into block and returnsblock result
   def session &blk
-    @session and (raise 'concurrent sessions not allowed')
-    @session = (Net::IMAP.new 'imap.gmail.com', '993', true)
-    @session.login @username, @password
-    yield self
+    session = (Session.new @username, @password)
+    yield session
   ensure
-    @session = nil
-    #logout rescue nil
+    session.logout rescue nil
   end
 
-  def folders
-    @session.list '', '[Gmail]/%'
+  def report 
+    (Reports.new self)
   end
 
-  # returns mail UID list
-  def mails_in_folder_on_given_date folder, start_date, end_date = nil
-    @session.examine folder
-    if end_date
+  class Session < Net::IMAP
+
+    def initialize username, password
+      super('imap.gmail.com', '993', true)
+      login username, password
+    end
+
+    # returns mail UID list
+    def mails_in_folder_in_date_range folder, start_date, end_date
+      examine folder
       t1 = start_date.strftime('%e-%b-%Y')
       t2 = (end_date + 1).strftime('%e-%b-%Y')
-      uids = @session.uid_search ['BEFORE', t2, 'SINCE', t1]
-    else
-      date = start_date
-      uids = @session.uid_search ['ON', date.strftime('%e-%b-%Y')]
+      uids = uid_search ['BEFORE', t2, 'SINCE', t1]
     end
-    #puts "#{uids.size} mails in #{folder} on #{date_s}"
+
+    # returns mail UID list
+    def mails_in_folder_on_given_date folder, date
+      examine folder
+      uids = uid_search ['ON', date.strftime('%e-%b-%Y')]
+      #puts "#{uids.size} mails in #{folder} on #{date_s}"
+    end
+
+    # returns mail UID list
+    def mails_in_folder_before_given_date folder, date
+      examine folder
+      uids = uid_search ['BEFORE', date.strftime('%e-%b-%Y')]
+      #puts "#{uids.size} mails in #{folder} on #{date_s}"
+    end
+
+    # return list of Gmail folders
+    def folders
+      list '', '[Gmail]/%'
+    end
+
+    # examine folder 
+    def in_folder name
+      examine(@folder_name = name)
+      self
+    end
+    def in_trash    
+      in_folder('[Gmail]/Trash') 
+    end
+    def in_sent
+      in_folder('[Gmail]/Sent Mail') 
+    end
+    def in_archived
+      in_folder('[Gmail]/All Mail') 
+    end
+    def in_starred
+      in_folder('[Gmail]/Starred') 
+    end
+
+    def imap_date string_or_date
+      unless (string_or_date.is_a? Date)
+        string_or_date = (Date.parse string_or_date) 
+      end
+      string_or_date.strftime('%e-%b-%Y')
+    end
+      
+    def on_given_date date
+      uid_search ['ON', imap_date(date)]
+    end
+
+    # returns UID list, including first day, excluding last day
+    def in_period first_day, last_day
+      #t1 = first_day
+      #t2 = (Date.parse(last_day) + 1)
+      # BEFORE <date>: messages with an internal date strictly before <date>
+      # SINCE <date>: messages with an internal date on or after <date>
+      uid_search ['BEFORE', imap_date(last_day), 'SINCE', imap_date(first_day)]
+    end
+
+    def before date, including_date = true
+      if including_date
+        date = Date.parse(date) + 1
+      end
+      uid_search ['BEFORE', imap_date(date)]
+    end
   end
 
+  class Reports
+    def initialize gmail
+      @gmail = gmail
+    end
 
-  # returns mail UID list
-  def mails_in_folder_before_given_date folder, date
-    @session.examine folder
-    uids = @session.uid_search ['BEFORE', date.strftime('%e-%b-%Y')]
-    #puts "#{uids.size} mails in #{folder} on #{date_s}"
+    # time period including first and last day
+    def in_period first_day, last_day, _ = {}
+      @gmail.session do |session|
+        {
+          :name => :in_period, 
+          :first_day => first_day,
+          :last_day => last_day, 
+          :trashed  => session.in_trash.in_period(first_day, last_day).size,
+          :sent     => session.in_sent.in_period(first_day, last_day).size,
+          :archived => session.in_archived.in_period(first_day, last_day).size,
+          :starred  => session.in_starred.before(last_day).size,
+        }
+      end
+    end
+
+    def on_date date, _ = {}
+      @gmail.session do |session|
+        {
+          :name     => :on_date, :date => date,
+          :trashed  => session.in_trash.on_given_date(date).size,
+          :sent     => session.in_sent.on_given_date(date).size,
+          :archived => session.in_archived.on_given_date(date).size,
+          :starred  => session.in_starred.before(date).size,
+        }
+      end
+    end
+
+    def yesterday _ = {}
+      on_date (Date.today - 1).strftime('%e-%b-%Y')
+    end
   end
 end
 
 class MboxQueries 
-  def initialize mbox
-    @mbox = mbox
+  def initialize session
+    @session = session
   end
 
   def number_of_deleted_mails t1, t2 = nil
-    (@mbox.mails_in_folder_on_given_date '[Gmail]/Trash', t1, t2).size
+    (@session.mails_in_folder_on_given_date '[Gmail]/Trash', t1, t2).size
   end
 
   def number_of_sent_mails t1, t2 = nil
-    (@mbox.mails_in_folder_on_given_date '[Gmail]/Sent Mail', t1, t2).size
+    (@session.mails_in_folder_on_given_date '[Gmail]/Sent Mail', t1, t2).size
   end
 
   def number_of_archived_mails t1, t2 = nil
-    (@mbox.mails_in_folder_on_given_date '[Gmail]/All Mail', t1, t2).size
+    (@session.mails_in_folder_on_given_date '[Gmail]/All Mail', t1, t2).size
   end
 
   def total_number_of_starred_mails on_date
-    (@mbox.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
+    (@session.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
   end
 
   def report_range from_date, to_date
@@ -85,10 +177,10 @@ class MboxQueries
   def report_on_date date
     [
       date,
-      (number_of_deleted_mails date),
-      (number_of_sent_mails date),
-      (number_of_archived_mails date),
-      (total_number_of_starred_mails date)
+      (@session.in_trash { on_given_date date }).size,
+      (@session.in_sent { on_given_date date }).size,
+      (@session.in_archived { on_given_date date }).size,
+      (@session.in_starred { before_given_date date+1 }).size,
     ]
   end
 end
@@ -162,7 +254,7 @@ class MboxDaemon
 end
 
 Defaults = {
-  :date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
+  #:date => (Date.today - 1).strftime('%e-%b-%Y'), # yesterday
   :interface => '127.0.0.1', :port => 2013, 
 }
 
@@ -174,44 +266,28 @@ Applix.main(ARGV, Defaults) do
 
     (username = args.shift) or raise 'no username?'
     @gmail = Gmail.new(username, @password)
-
-    # needs to up-type string date because it could come from command line
-    options[:date] = Date.parse(options[:date])
   end
 
-  handle(:server) do |options|
+  handle(:server) do 
     daemon = MboxDaemon.new(@gmail)
     daemon.run options
   end
 
-  handle(:report) do |options|
-    #puts "folders: #{ mbox.folders.map { |f| f.name }.inspect}"
-    @gmail.session do |gmail|
-      date = options[:date]
-      values = MboxQueries.new(gmail).report_on_date(date)
-      puts <<-EOR
- -- mails stats for #{values[0]}
-       deleted: #{values[1]}
-          sent: #{values[2]}
-      archived: #{values[3]}
-starred(total): #{values[4]}
-      EOR
-    end
+  handle(:report) do |*args, options|
+    puts "report: #{args.inspect}, #{options.inspect}"
+    report = args.shift
+    result = @gmail.report.send(report, *args, options)
+    puts ":#{report}: #{result.inspect}"
   end
 
-  handle(:date_range) do |from_date, to_date, options|
-    # begin and end of date range
-    from_date = Date.parse(from_date)
-    to_date = Date.parse(to_date)
-    @gmail.session do |gmail|
-      values = MboxQueries.new(gmail).report_range(from_date, to_date)
-      puts <<-EOR
- -- mails stats for #{values[0]} - #{values[1]}
-       deleted: #{values[2]}
-          sent: #{values[3]}
-      archived: #{values[4]}
-starred(total): #{values[5]}
-      EOR
-    end
+  any do |*args, options|
+    puts "any: #{args.inspect}, #{options.inspect}"
+    report = args.shift
+    result = @gmail.report.send(report, *args, options)
+    puts ":#{report}: #{result.inspect}"
+  end
+
+  epilog do |rc, args, options|
+    # hmmm, generalizing the reporting down here?
   end
 end
