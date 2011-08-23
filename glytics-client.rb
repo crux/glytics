@@ -2,6 +2,7 @@
 
 require 'rubygems'
 require 'yaml'
+require 'json'
 require 'socket'
 require 'applix'
 
@@ -11,36 +12,36 @@ Defaults = {
 
 Applix.main(ARGV, Defaults) do 
 
-  prolog do |*args, options|
-    @records = {}
-    if (@datafile = options[:db]) and (File.exists? @datafile)
-      samples = (File.open(@datafile) { |fd| YAML.load fd })
-      samples.each do |sample|
-        date = (sample.split ':').first
-        @records[date] = sample
-      end
-    end
-  end
-
   any do |*args, options|
     request = args.join ' '
     puts "request: #{request}"
     sock = TCPSocket.open options[:host], options[:port]
     sock.puts(request)
+    results = []
     loop do
       result = sock.gets.strip
       break if result.empty?
       puts "result: #{result}"
-      date = (result.split ':').first
-      @records[date] = result
+      results << result
     end
     puts 'done.'
+    results
   end
 
-  epilog do
-    if @datafile
-      values = @records.values.sort
-      File.open(@datafile, "w") { |fd| fd.write values.to_yaml }
+  epilog do |results, *args, options|
+    if (@datafile = options[:db])
+      model = {}
+      if File.exists? @datafile
+        model = (File.open(@datafile) { |fd| YAML.load fd })
+      end
+
+      results.each do |result|
+        record = (JSON.parse result)
+        puts "record: #{record.inspect}"
+      end
+
+      #values = @records.values.sort
+      #File.open(@datafile, "w") { |fd| fd.write values.to_yaml }
     end
   end
 end

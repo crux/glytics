@@ -3,6 +3,7 @@
 require 'rubygems'
 require 'date'
 require 'net/imap'
+require 'json'
 require 'socket'
 require 'highline/import'
 require 'applix'
@@ -78,9 +79,9 @@ class Gmail
     end
 
     def imap_date string_or_date
-      unless (string_or_date.is_a? Date)
-        string_or_date = (Date.parse string_or_date) 
-      end
+      #unless (string_or_date.is_a? Date)
+      #  string_or_date = (Date.parse string_or_date) 
+      #end
       string_or_date.strftime('%e-%b-%Y')
     end
       
@@ -97,10 +98,10 @@ class Gmail
       uid_search ['BEFORE', imap_date(last_day), 'SINCE', imap_date(first_day)]
     end
 
-    def before date, including_date = true
-      if including_date
-        date = Date.parse(date) + 1
-      end
+    def before date #, including_date = true
+      #if including_date
+      #  date = Date.parse(date) + 1
+      #end
       uid_search ['BEFORE', imap_date(date)]
     end
   end
@@ -110,8 +111,14 @@ class Gmail
       @gmail = gmail
     end
 
+    def typed_date date
+      (date.is_a? Date) && date || (Date.parse date)
+    end
+
     # time period including first and last day
     def in_period first_day, last_day, _ = {}
+      first_day = (typed_date first_day)
+      last_day = (typed_date last_day)
       @gmail.session do |session|
         {
           :name => :in_period, 
@@ -120,25 +127,26 @@ class Gmail
           :trashed  => session.in_trash.in_period(first_day, last_day).size,
           :sent     => session.in_sent.in_period(first_day, last_day).size,
           :archived => session.in_archived.in_period(first_day, last_day).size,
-          :starred  => session.in_starred.before(last_day).size,
+          :starred  => session.in_starred.before(last_day+1).size,
         }
       end
     end
 
     def on_date date, _ = {}
+      date = (typed_date date)
       @gmail.session do |session|
         {
           :name     => :on_date, :date => date,
           :trashed  => session.in_trash.on_given_date(date).size,
           :sent     => session.in_sent.on_given_date(date).size,
           :archived => session.in_archived.on_given_date(date).size,
-          :starred  => session.in_starred.before(date).size,
+          :starred  => session.in_starred.before(date+1).size,
         }
       end
     end
 
     def yesterday _ = {}
-      on_date (Date.today - 1).strftime('%e-%b-%Y')
+      on_date(Date.today - 1)
     end
   end
 end
@@ -159,9 +167,10 @@ class MboxDaemon
       rescue => e
         puts " ## #{e} ##\n    #{e.backtrace.join "\n    "}"
       ensure
+        puts 'closing session...'
         sock.close rescue nil
-        puts "session closed"
         server.close rescue nil
+        puts 'done.'
       end
     end
   end
@@ -173,7 +182,7 @@ class MboxDaemon
       report = args.shift
       result = @gmail.report.send(report, *args, options)
       #puts ":#{report}: #{result.inspect}"
-      sock.puts(result.inspect)
+      sock.puts(result.to_json)
       sock.puts '' rescue nil
     end
   end
@@ -185,6 +194,7 @@ Defaults = {
 }
 
 Applix.main(ARGV, Defaults) do 
+
   prolog do |args, options|
     # account is an command line arg but password is prompted, never have that
     # in a config or on the command line!
@@ -195,112 +205,30 @@ Applix.main(ARGV, Defaults) do
   end
 
   handle(:server) do |*_, options|
-    daemon = MboxDaemon.new(@gmail)
-    daemon.run options
+    @daemon = MboxDaemon.new(@gmail)
+    @daemon.run options
   end
 
   handle(:report) do |*args, options|
     puts "report: #{args.inspect}, #{options.inspect}"
     report = args.shift
-    result = @gmail.report.send(report, *args, options)
-    puts ":#{report}: #{result.inspect}"
+    @result = @gmail.report.send(report, *args, options)
+    puts ":#{report}: #{@result.inspect}"
   end
 
   any do |*args, options|
-    puts "any: #{args.inspect}, #{options.inspect}"
-    report = args.shift
-    result = @gmail.report.send(report, *args, options)
-    puts ":#{report}: #{result.inspect}"
+    #puts "any: #{args.inspect}, #{options.inspect}"
+    @report = args.shift
+    @result = @gmail.report.send(@report, *args, options)
+    #puts ":#{report}: #{@result.inspect}"
   end
 
   epilog do |rc, args, options|
-    # hmmm, generalizing the reporting down here?
-  end
-end
-
-__END__
-
-  def serve_ sock, options
-    while request = sock.gets
-      request = request.strip.split /\s+/
-      puts "request: #{request.inspect}"
-      case request.shift
-      when /on_date$/
-        options[:date] = Date.parse(request.first)
-        report sock, options
-      when /in_range/
-        options[:from_date] = Date.parse(request.shift)
-        options[:to_date] = Date.parse(request.shift)
-        report_range sock, options
-      when /on_date_sequence/
-        options[:from_date] = Date.parse(request.shift)
-        options[:to_date] = Date.parse(request.shift)
-        report_sequence sock, options
-      when /yesterday/
-        report sock, options
-      else 
-        raise "400 bad request: #{request}"
+    if @result
+      puts " -- report :: #{@report} --"
+      @result.keys.sort.each do |key|
+        puts "#{key}: #{@result[key]}"
       end
-      sock.puts '' rescue nil
     end
-  end
-
-  def report sock, options
-    date = options[:date]
-    values = @gmail.session do |gmail| 
-      MboxQueries.new(gmail).report_on_date date
-    end
-    sock.puts(values.join ':')
-  end
-    
-  def report_sequence sock, options
-    date = options[:from_date]
-    while date < options[:to_date]
-      puts "on_date: #{date.strftime('%e-%b-%Y')}"
-      options[:date] = date
-      report sock, options
-      date += 1
-    end
-  end
-
-class MboxQueries 
-  def initialize session
-    @session = session
-  end
-
-  def number_of_deleted_mails t1, t2 = nil
-    (@session.mails_in_folder_on_given_date '[Gmail]/Trash', t1, t2).size
-  end
-
-  def number_of_sent_mails t1, t2 = nil
-    (@session.mails_in_folder_on_given_date '[Gmail]/Sent Mail', t1, t2).size
-  end
-
-  def number_of_archived_mails t1, t2 = nil
-    (@session.mails_in_folder_on_given_date '[Gmail]/All Mail', t1, t2).size
-  end
-
-  def total_number_of_starred_mails on_date
-    (@session.mails_in_folder_before_given_date '[Gmail]/Starred', on_date+1).size
-  end
-
-  def report_range from_date, to_date
-    [
-      from_date, to_date,
-      (number_of_deleted_mails from_date, to_date),
-      (number_of_sent_mails from_date, to_date),
-      (number_of_archived_mails from_date, to_date),
-      (total_number_of_starred_mails to_date)
-    ]
-  end
-
-  def report_on_date date
-    [
-      date,
-      (@session.in_trash { on_given_date date }).size,
-      (@session.in_sent { on_given_date date }).size,
-      (@session.in_archived { on_given_date date }).size,
-      (@session.in_starred { before_given_date date+1 }).size,
-    ]
   end
 end
