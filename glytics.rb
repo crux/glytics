@@ -225,9 +225,12 @@ Applix.main(ARGV, Defaults) do
 
   epilog do |rc, args, options|
     if @result
-      puts " -- report :: #{@report} --"
-      @result.keys.sort.each do |key|
-        puts "#{key}: #{@result[key]}"
+      puts " -- #{@report} --"
+      keys = @result.keys.sort
+      maxcolumns = keys.max.length
+      keys.each do |key|
+        #puts "#{key}: #{@result[key]}"
+        print("%#{maxcolumns+2}s : #{@result[key]}\n" % [key])
       end
     end
   end
