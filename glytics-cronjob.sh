@@ -1,9 +1,9 @@
 #!/bin/bash -f
 
-BASE=/home/dirk/proj/gmail-stats
-LOG=${BASE}/gmail-stats-cronjob.log
+BASE=${BASE:=/home/dirk/proj/gmail-stats}
+LOG=${LOG:=${BASE}/glytics.log}
 
-CMD="./glytics.rb"
+CMD="./glytics-client.rb"
 CMD="${CMD} --db=glytics.yml"
 CMD="${CMD} --host=127.0.0.1 yesterday"
 
