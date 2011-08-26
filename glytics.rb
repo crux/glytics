@@ -33,30 +33,6 @@ class Gmail
       login username, password
     end
 
-=begin
-    # returns mail UID list
-    def mails_in_folder_in_date_range folder, start_date, end_date
-      examine folder
-      t1 = start_date.strftime('%e-%b-%Y')
-      t2 = (end_date + 1).strftime('%e-%b-%Y')
-      uids = uid_search ['BEFORE', t2, 'SINCE', t1]
-    end
-
-    # returns mail UID list
-    def mails_in_folder_on_given_date folder, date
-      examine folder
-      uids = uid_search ['ON', date.strftime('%e-%b-%Y')]
-      #puts "#{uids.size} mails in #{folder} on #{date_s}"
-    end
-
-    # returns mail UID list
-    def mails_in_folder_before_given_date folder, date
-      examine folder
-      uids = uid_search ['BEFORE', date.strftime('%e-%b-%Y')]
-      #puts "#{uids.size} mails in #{folder} on #{date_s}"
-    end
-=end
-
     # return list of Gmail folders
     def folders
       list '', '[Gmail]/%'
