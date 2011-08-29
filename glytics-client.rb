@@ -4,6 +4,7 @@ require 'rubygems'
 require 'yaml'
 require 'json'
 require 'socket'
+require 'googlecharts'
 require 'applix'
 
 Defaults = {
@@ -20,6 +21,20 @@ class Model < Hash
       h = (File.open(@filename) { |fd| YAML.load fd })
       self.replace h
     end
+  end
+
+  def days
+    @days ||= self[:on_date].values.sort {|a, b| a["date"] <=> b["date"]}
+    # thats what an :on_date entry looks like:
+    #
+    #  "2011-08-24": 
+    #    name: on_date
+    #    date: "2011-08-24"
+    #    trashed: 167
+    #    sent: 8
+    #    archived: 35
+    #    starred: 13
+    #
   end
 
   def save
@@ -55,7 +70,67 @@ class Model < Hash
   end
 end
 
+class ChartMaker
+  Defaults = {
+    :modelfile => 'glytics.yml', #:filename => 'chart.png', 
+    :format => 'url', # || image_tag || file
+    :size => '600x200',
+    :line_colors => '4a8c3d,cbd64d,aaaaaa',
+  }
+
+  def initialize options = {}
+    @options = (Defaults.merge options)
+    @model = Model.new @options[:modelfile]
+  end
+
+  def show 
+    # XXX: mac osx only!
+    system "open #{@options[:filename]}"
+  end
+  
+  def days args, options = {}
+    options = (@options.merge options)
+
+    # render to file when filename is given
+    (not options[:filename].nil?) and (options[:format] = 'file')
+
+    dates, sent, archived, trashed = %w(date sent archived trashed).map do |key| 
+      @model.days.map { |record| record[key] }
+    end
+
+    x_label = dates.each_with_index.map {|x,idx| x if idx % 30 == 0}.compact
+    puts "x_label: #{x_label}"
+
+    options.update(
+      :data => [sent, archived, trashed],
+      :legend => ['sent', 'archived', 'trashed'],
+      :title => 'mails per day', 
+      :axis_with_labels => ['x', 'y'], # 'date', '# of mails'],
+      #:axis_labels => ['Jan','July','Jan','July','Jan'],
+      :axis_labels => [x_label],
+    )
+    puts "options: #{options.inspect}"
+
+    chart = Gchart.line(options)
+    puts chart
+  end
+end
+
 Applix.main(ARGV, Defaults) do 
+
+  cluster(:render) do
+    prolog do |_, options|
+      @cm = ChartMaker.new options
+    end
+
+    handle(:days) do |*args, options|
+      @cm.days args, options
+    end
+
+    epilog do |records, *args, options|
+      @cm.show if options[:show]
+    end
+  end
 
   # :any kind of (non matched) argument is just forwared as request to the
   # glytics daemon. could very well be that this fails,
@@ -76,18 +151,13 @@ Applix.main(ARGV, Defaults) do
     records
   end
 
-  # whatever is returned by a request might be persisted 
+  # generic epilog helper method to coordinate Model access
   epilog do |records, *args, options|
-    if(datafile = options[:db])
-      save_model datafile, records, options
+    if(datafile = options[:save])
+      model = Model.new datafile
+      records.each { |record| model.insert record }
+      model.save
     end
-  end
-
-  # helper method to coordinate Model access
-  def save_model datafile, records, options = {}
-    model = Model.new datafile
-    records.each { |record| model.insert record }
-    model.save
   end
 end
 
