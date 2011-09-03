@@ -17,7 +17,11 @@ all your time go? Enter glytics for gmail analytics reporting:
 
 _glytics_ asks for your account password and then queries gmail for your:
 
-sent:: number of sent mails
-archived:: number of archived mails
-deleted:: number of mails deleted 
-starred:: total amount of starred mails 
+sent
+: number of sent mails
+archived
+: number of archived mails
+deleted
+: number of mails deleted 
+starred
+: total amount of starred mails 
