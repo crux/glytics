@@ -35,7 +35,10 @@ class Gmail
 
     # return list of Gmail folders
     def folders
-      list '', '[Gmail]/%'
+      @folders ||= (list '', '[Gmail]/%')
+    end
+    def folder_names
+      folders.map {|f| f.name}
     end
 
     # examine folder 
@@ -44,7 +47,10 @@ class Gmail
       self
     end
     def in_trash    
-      in_folder('[Gmail]/Trash') 
+      # trash folder is called 'Bin' in some language settings..
+      #puts "folders: #{folder_names}"
+      trash_name = (folder_names.include?('[Gmail]/Bin') ? "Bin" : "Trash")
+      in_folder("[Gmail]/#{trash_name}")
     end
     def in_sent
       in_folder('[Gmail]/Sent Mail') 
